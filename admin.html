@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Globalingua — Generador de códigos</title>
+<style>
+  :root{ --bg:#F7F8FB; --card:#FFFFFF; --alt:#EEF1F6; --coral:#FF6F7D; --blue:#3B6FE0; --text:#1E2430; --muted:#68707E; --line:rgba(30,36,48,0.12); --green:#1FAE6E; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:520px; margin:0 auto; padding:24px 20px 60px; }
+  h1{ font-size:22px; margin:0 0 4px; }
+  .sub{ color:var(--muted); font-size:14px; margin:0 0 20px; line-height:1.5; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:16px; }
+  label{ display:block; font-size:12.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin:14px 0 6px; }
+  label:first-child{ margin-top:0; }
+  input, textarea{ width:100%; padding:12px 14px; border-radius:12px; border:1.5px solid var(--line); background:var(--alt); font-size:15px; font-family:inherit; color:var(--text); }
+  textarea{ min-height:150px; line-height:1.5; resize:vertical; }
+  .hint{ font-size:12.5px; color:var(--muted); margin-top:6px; line-height:1.45; }
+  button{ background:var(--coral); color:var(--text); border:none; font-weight:700; font-size:15px; padding:14px; border-radius:14px; cursor:pointer; width:100%; margin-top:16px; font-family:inherit; }
+  button.secondary{ background:var(--alt); border:1px solid var(--line); margin-top:10px; }
+  .code-out{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:16px; font-weight:700; background:#EAF7F0; border:1.5px solid var(--green); border-radius:12px; padding:14px; word-break:break-all; user-select:all; }
+  .err{ color:#C0392B; font-size:13.5px; margin-top:10px; font-weight:600; }
+  .log-row{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .log-row:last-child{ border-bottom:none; }
+  .log-code{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:var(--muted); word-break:break-all; }
+  .log-del{ background:none; border:none; color:#C0392B; width:auto; padding:0; margin:0; font-size:12.5px; font-weight:700; cursor:pointer; text-decoration:underline; }
+  .safe{ background:#FFF7E8; border:1.5px solid #F5C563; border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.5; color:#5C4300; margin-bottom:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔑 Generador de códigos de acceso</h1>
+  <p class="sub">Crea el código personal de cada estudiante. Un mismo código sirve para <strong>Globalingua</strong> y <strong>Globalingua IELTS</strong>.</p>
+
+  <div class="safe">
+    🔒 Esta página trabaja <strong>solo en tu navegador</strong>: tu <em>frase secreta</em> nunca se envía a ningún servidor ni se guarda. Sin esa frase, esta página no sirve para nada, así que es seguro que esté publicada.
+  </div>
+
+  <div class="card">
+    <label for="secret">Tu frase secreta (CODE_SECRET)</label>
+    <input type="password" id="secret" autocomplete="off" placeholder="La misma que pusiste en Netlify">
+
+    <label for="name">Nombre del estudiante</label>
+    <input type="text" id="name" autocomplete="off" placeholder="Ej: Ana María">
+
+    <label for="expiry">Acceso válido hasta</label>
+    <input type="date" id="expiry">
+    <div class="hint">El código funciona hasta el final de ese día (hora de Colombia). Pon la fecha en que termina su curso.</div>
+
+    <button id="generate">Generar código</button>
+    <div class="err" id="error" hidden></div>
+  </div>
+
+  <div class="card" id="result" hidden>
+    <label>Código</label>
+    <div class="code-out" id="code-out"></div>
+    <button class="secondary" id="copy-code">📋 Copiar código</button>
+
+    <label style="margin-top:18px;">Mensaje listo para enviar por WhatsApp</label>
+    <textarea id="message"></textarea>
+    <button class="secondary" id="copy-message">📋 Copiar mensaje</button>
+  </div>
+
+  <div class="card" id="log-card" hidden>
+    <label>Códigos que has generado en este navegador</label>
+    <div id="log"></div>
+    <div class="hint">Esta lista se guarda solo aquí, en este navegador, como recordatorio tuyo. Para bloquear a alguien antes de su fecha, agrega su nombre (la primera parte del código) a la variable REVOKED_CODES en Netlify.</div>
+  </div>
+</div>
+
+<script>
+/*MAKECODE_START*/
+function slugify(name){
+  const s = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  return s || 'est';
+}
+function toYYMMDD(dateStr){ // 'AAAA-MM-DD' -> 'AAMMDD'
+  const [y, m, d] = dateStr.split('-');
+  return y.slice(2) + m + d;
+}
+async function makeAccessCode(secret, name, dateStr){
+  const slug = slugify(name);
+  const exp = toYYMMDD(dateStr);
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(slug + '-' + exp));
+  const hex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+  return slug + '-' + exp + '-' + hex;
+}
+/*MAKECODE_END*/
+
+const $ = (id) => document.getElementById(id);
+const LOG_KEY = 'globalingua:issuedCodes';
+
+function readLog(){ try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }catch(e){ return []; } }
+function writeLog(list){ try{ localStorage.setItem(LOG_KEY, JSON.stringify(list)); }catch(e){} }
+
+function prettyDate(dateStr){
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const months = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  return d + ' de ' + months[m - 1] + ' de ' + y;
+}
+
+function renderLog(){
+  const list = readLog();
+  $('log-card').hidden = list.length === 0;
+  $('log').innerHTML = '';
+  list.slice().reverse().forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    const left = document.createElement('div');
+    const title = document.createElement('div');
+    title.innerHTML = '<strong></strong> · hasta ' + prettyDate(item.expiry);
+    title.querySelector('strong').textContent = item.name;
+    const codeEl = document.createElement('div');
+    codeEl.className = 'log-code';
+    codeEl.textContent = item.code;
+    left.appendChild(title); left.appendChild(codeEl);
+    const del = document.createElement('button');
+    del.className = 'log-del'; del.textContent = 'Quitar de la lista';
+    del.addEventListener('click', () => { writeLog(readLog().filter(x => x.code !== item.code)); renderLog(); });
+    row.appendChild(left); row.appendChild(del);
+    $('log').appendChild(row);
+  });
+}
+
+function copy(text, btn){
+  const done = () => { const old = btn.textContent; btn.textContent = '✓ Copiado'; setTimeout(() => btn.textContent = old, 1500); };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done)); }
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }catch(e){}
+  ta.remove();
+}
+
+(function init(){
+  const d = new Date(); d.setDate(d.getDate() + 90);
+  $('expiry').value = d.toISOString().slice(0, 10);
+  renderLog();
+})();
+
+$('generate').addEventListener('click', async () => {
+  const secret = $('secret').value;
+  const name = $('name').value.trim();
+  const expiry = $('expiry').value;
+  const err = $('error'); err.hidden = true;
+  if(secret.length < 12){ err.textContent = 'Escribe tu frase secreta (la que configuraste en Netlify como CODE_SECRET).'; err.hidden = false; return; }
+  if(!name){ err.textContent = 'Escribe el nombre del estudiante.'; err.hidden = false; return; }
+  if(!expiry){ err.textContent = 'Elige hasta qué fecha vale el acceso.'; err.hidden = false; return; }
+  if(!(window.crypto && crypto.subtle)){ err.textContent = 'Tu navegador no permite generar códigos aquí. Abre esta página desde tu enlace https de Netlify.'; err.hidden = false; return; }
+
+  const code = await makeAccessCode(secret, name, expiry);
+  $('code-out').textContent = code;
+  const origin = location.origin;
+  const firstName = name.split(/\s+/)[0];
+  $('message').value =
+    '¡Hola ' + firstName + '! 🎉 Tu acceso a GLOBALINGUA ya está listo.\n\n' +
+    '📱 Globalingua (conversación): ' + origin + '/\n' +
+    '🎓 Globalingua IELTS: ' + origin + '/ielts/\n\n' +
+    '🔑 Tu código de acceso:\n' + code + '\n\n' +
+    'Pégalo la primera vez que abras la app (solo una vez por dispositivo). Es personal, así que no lo compartas. ' +
+    'Tu acceso está activo hasta el ' + prettyDate(expiry) + '. ¡A practicar! 💪';
+  $('result').hidden = false;
+
+  const list = readLog().filter(x => x.code !== code);
+  list.push({ name, expiry, code });
+  writeLog(list);
+  renderLog();
+  $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+$('copy-code').addEventListener('click', (e) => copy($('code-out').textContent, e.target));
+$('copy-message').addEventListener('click', (e) => copy($('message').value, e.target));
+</script>
+</body>
+</html>
